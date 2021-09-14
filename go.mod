@@ -2,7 +2,10 @@ module istio.io/istio
 
 go 1.15
 
-replace github.com/spf13/viper => github.com/istio/viper v1.3.3-0.20190515210538-2789fed3109c
+replace (
+	github.com/spf13/viper => github.com/istio/viper v1.3.3-0.20190515210538-2789fed3109c
+	github.com/envoyproxy/go-control-plane => github.com/FeiYing9/go-control-plane v0.9.9-xprotocol
+)
 
 // Old version had no license
 replace github.com/chzyer/logex => github.com/chzyer/logex v1.1.11-0.20170329064859-445be9e134b2
@@ -33,7 +36,7 @@ require (
 	github.com/coreos/go-oidc v2.2.1+incompatible
 	github.com/davecgh/go-spew v1.1.1
 	github.com/docker/distribution v2.7.1+incompatible
-	github.com/envoyproxy/go-control-plane v0.9.9-0.20210115003313-31f9241a16e6
+	github.com/envoyproxy/go-control-plane v0.9.9-xprotocol
 	github.com/evanphx/json-patch v4.9.0+incompatible
 	github.com/evanphx/json-patch/v5 v5.1.0
 	github.com/fatih/color v1.10.0
