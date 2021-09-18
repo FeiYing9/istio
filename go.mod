@@ -4,7 +4,7 @@ go 1.15
 
 replace github.com/spf13/viper => github.com/istio/viper v1.3.3-0.20190515210538-2789fed3109c
 
-replace github.com/envoyproxy/go-control-plane v0.9.9 => github.com/FeiYing9/go-control-plane v0.9.10
+replace github.com/envoyproxy/go-control-plane v0.9.9 => github.com/FeiYing9/go-control-plane v0.9.12
 
 // Old version had no license
 replace github.com/chzyer/logex => github.com/chzyer/logex v1.1.11-0.20170329064859-445be9e134b2
