@@ -18,12 +18,6 @@
 package xds
 
 import (
-	_ "github.com/envoyproxy/go-control-plane/contrib/envoy/extensions/filters/http/squash/v3"
-	_ "github.com/envoyproxy/go-control-plane/contrib/envoy/extensions/filters/http/sxg/v3alpha"
-	_ "github.com/envoyproxy/go-control-plane/contrib/envoy/extensions/filters/network/kafka_broker/v3"
-	_ "github.com/envoyproxy/go-control-plane/contrib/envoy/extensions/filters/network/mysql_proxy/v3"
-	_ "github.com/envoyproxy/go-control-plane/contrib/envoy/extensions/filters/network/postgres_proxy/v3alpha"
-	_ "github.com/envoyproxy/go-control-plane/contrib/envoy/extensions/filters/network/rocketmq_proxy/v3"
 	_ "github.com/envoyproxy/go-control-plane/envoy/admin/v2alpha"
 	_ "github.com/envoyproxy/go-control-plane/envoy/admin/v3"
 	_ "github.com/envoyproxy/go-control-plane/envoy/admin/v4alpha"
@@ -349,15 +343,6 @@ import (
 	_ "github.com/envoyproxy/go-control-plane/envoy/type/tracing/v3"
 	_ "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 	_ "github.com/envoyproxy/go-control-plane/envoy/watchdog/v3alpha"
-	_ "github.com/envoyproxy/go-control-plane/pkg/cache/v3"
-	_ "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
-	_ "github.com/envoyproxy/go-control-plane/pkg/server/delta/v3"
-	_ "github.com/envoyproxy/go-control-plane/pkg/server/rest/v3"
-	_ "github.com/envoyproxy/go-control-plane/pkg/server/sotw/v3"
-	_ "github.com/envoyproxy/go-control-plane/pkg/server/stream/v3"
-	_ "github.com/envoyproxy/go-control-plane/pkg/server/v3"
-	_ "github.com/envoyproxy/go-control-plane/pkg/test/resource/v3"
-	_ "github.com/envoyproxy/go-control-plane/pkg/test/v3"
 
 	// Istio-specific Envoy filters
 	_ "istio.io/istio/pkg/envoy/config/filter/http/alpn/v2alpha1"
