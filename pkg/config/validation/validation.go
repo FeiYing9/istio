@@ -2779,13 +2779,24 @@ func validateHTTPRetry(retries *networking.HTTPRetry) (errs error) {
 }
 
 func validateHTTPRedirect(redirect *networking.HTTPRedirect) error {
-	if redirect != nil && redirect.Uri == "" && redirect.Authority == "" {
-		return errors.New("redirect must specify URI, authority, or both")
+	if redirect == nil {
+		return nil
+	}
+	if redirect.Uri == "" && redirect.Authority == "" && redirect.RedirectPort == nil && redirect.Scheme == "" {
+		return errors.New("redirect must specify URI, authority, scheme, or port")
 	}
 
-	if redirect != nil && redirect.RedirectCode != 0 {
+	if redirect.RedirectCode != 0 {
 		if redirect.RedirectCode < 300 || redirect.RedirectCode > 399 {
 			return fmt.Errorf("%d is not a valid redirect code, must be 3xx", redirect.RedirectCode)
+		}
+	}
+	if redirect.Scheme != "" && redirect.Scheme != "http" && redirect.Scheme != "https" {
+		return fmt.Errorf(`invalid redirect scheme, must be "http" or "https"`)
+	}
+	if redirect.GetPort() > 0 {
+		if err := ValidatePort(int(redirect.GetPort())); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -3022,12 +3033,12 @@ var ValidateServiceEntry = registerValidateFunc("ValidateServiceEntry",
 			if unixEndpoint && len(serviceEntry.Ports) != 1 {
 				errs = appendValidation(errs, errors.New("exactly 1 service port required for unix endpoints"))
 			}
-		case networking.ServiceEntry_DNS:
+		case networking.ServiceEntry_DNS, networking.ServiceEntry_DNS_ROUND_ROBIN:
 			if len(serviceEntry.Endpoints) == 0 {
 				for _, hostname := range serviceEntry.Hosts {
 					if err := ValidateFQDN(hostname); err != nil {
 						errs = appendValidation(errs,
-							fmt.Errorf("hosts must be FQDN if no endpoints are provided for resolution mode DNS"))
+							fmt.Errorf("hosts must be FQDN if no endpoints are provided for resolution mode %s", serviceEntry.Resolution))
 					}
 				}
 			}

@@ -49,7 +49,7 @@ type instancesKey struct {
 }
 
 func makeInstanceKey(i *model.ServiceInstance) instancesKey {
-	return instancesKey{i.Service.ClusterLocal.Hostname, i.Service.Attributes.Namespace}
+	return instancesKey{i.Service.Hostname, i.Service.Attributes.Namespace}
 }
 
 type externalConfigType int
@@ -213,7 +213,7 @@ func (s *ServiceEntryStore) workloadEntryHandler(old, curr config.Config, event 
 		if selected {
 			// If serviceentry's resolution is DNS, make a full push
 			// TODO: maybe cds?
-			if se.entry.Resolution == networking.ServiceEntry_DNS {
+			if se.entry.Resolution == networking.ServiceEntry_DNS || se.entry.Resolution == networking.ServiceEntry_DNS_ROUND_ROBIN {
 				fullPush = true
 				for key, value := range getUpdatedConfigs(se.services) {
 					configsUpdated[key] = value
@@ -259,7 +259,7 @@ func getUpdatedConfigs(services []*model.Service) map[model.ConfigKey]struct{} {
 	for _, svc := range services {
 		configsUpdated[model.ConfigKey{
 			Kind:      gvk.ServiceEntry,
-			Name:      string(svc.ClusterLocal.Hostname),
+			Name:      string(svc.Hostname),
 			Namespace: svc.Attributes.Namespace,
 		}] = struct{}{}
 	}
@@ -282,11 +282,11 @@ func (s *ServiceEntryStore) serviceEntryHandler(old, curr config.Config, event m
 			// Consider all services are updated.
 			mark := make(map[host.Name]*model.Service, len(cs))
 			for _, svc := range cs {
-				mark[svc.ClusterLocal.Hostname] = svc
+				mark[svc.Hostname] = svc
 				updatedSvcs = append(updatedSvcs, svc)
 			}
 			for _, svc := range os {
-				if _, f := mark[svc.ClusterLocal.Hostname]; !f {
+				if _, f := mark[svc.Hostname]; !f {
 					updatedSvcs = append(updatedSvcs, svc)
 				}
 			}
@@ -304,18 +304,18 @@ func (s *ServiceEntryStore) serviceEntryHandler(old, curr config.Config, event m
 
 	shard := model.ShardKeyFromRegistry(s)
 	for _, svc := range addedSvcs {
-		s.XdsUpdater.SvcUpdate(shard, string(svc.ClusterLocal.Hostname), svc.Attributes.Namespace, model.EventAdd)
+		s.XdsUpdater.SvcUpdate(shard, string(svc.Hostname), svc.Attributes.Namespace, model.EventAdd)
 		configsUpdated[makeConfigKey(svc)] = struct{}{}
 	}
 
 	for _, svc := range updatedSvcs {
-		s.XdsUpdater.SvcUpdate(shard, string(svc.ClusterLocal.Hostname), svc.Attributes.Namespace, model.EventUpdate)
+		s.XdsUpdater.SvcUpdate(shard, string(svc.Hostname), svc.Attributes.Namespace, model.EventUpdate)
 		configsUpdated[makeConfigKey(svc)] = struct{}{}
 	}
 
 	// If service entry is deleted, cleanup endpoint shards for services.
 	for _, svc := range deletedSvcs {
-		s.XdsUpdater.SvcUpdate(shard, string(svc.ClusterLocal.Hostname), svc.Attributes.Namespace, model.EventDelete)
+		s.XdsUpdater.SvcUpdate(shard, string(svc.Hostname), svc.Attributes.Namespace, model.EventDelete)
 		configsUpdated[makeConfigKey(svc)] = struct{}{}
 	}
 
@@ -326,7 +326,7 @@ func (s *ServiceEntryStore) serviceEntryHandler(old, curr config.Config, event m
 		// If the service entry had endpoints with FQDNs (i.e. resolution DNS), then we need to do
 		// full push (as fqdn endpoints go via strict_dns clusters in cds).
 		// Non DNS service entries are sent via EDS. So we should compare and update if such endpoints change.
-		if currentServiceEntry.Resolution == networking.ServiceEntry_DNS {
+		if currentServiceEntry.Resolution == networking.ServiceEntry_DNS || currentServiceEntry.Resolution == networking.ServiceEntry_DNS_ROUND_ROBIN {
 			if !reflect.DeepEqual(currentServiceEntry.Endpoints, oldServiceEntry.Endpoints) {
 				// fqdn endpoints have changed. Need full push
 				for _, svc := range unchangedSvcs {
@@ -368,14 +368,14 @@ func (s *ServiceEntryStore) serviceEntryHandler(old, curr config.Config, event m
 	allServices = append(allServices, updatedSvcs...)
 	allServices = append(allServices, unchangedSvcs...)
 	for _, svc := range allServices {
-		if svc.Resolution != model.DNSLB {
+		if !(svc.Resolution == model.DNSLB || svc.Resolution == model.DNSRoundRobinLB) {
 			nonDNSServices = append(nonDNSServices, svc)
 		}
 	}
 	// non dns service instances
 	keys := map[instancesKey]struct{}{}
 	for _, svc := range nonDNSServices {
-		keys[instancesKey{hostname: svc.ClusterLocal.Hostname, namespace: curr.Namespace}] = struct{}{}
+		keys[instancesKey{hostname: svc.Hostname, namespace: curr.Namespace}] = struct{}{}
 	}
 	// update eds endpoint shards
 	s.edsUpdateByKeys(keys, false)
@@ -512,19 +512,19 @@ func (s *ServiceEntryStore) Services() ([]*model.Service, error) {
 
 // GetService retrieves a service by host name if it exists.
 // NOTE: The service entry implementation is used only for tests.
-func (s *ServiceEntryStore) GetService(hostname host.Name) (*model.Service, error) {
+func (s *ServiceEntryStore) GetService(hostname host.Name) *model.Service {
 	if !s.processServiceEntry {
-		return nil, nil
+		return nil
 	}
 	// TODO(@hzxuzhonghu): only get the specific service instead of converting all the serviceEntries
 	services, _ := s.Services()
 	for _, service := range services {
-		if service.ClusterLocal.Hostname == hostname {
-			return service, nil
+		if service.Hostname == hostname {
+			return service
 		}
 	}
 
-	return nil, nil
+	return nil
 }
 
 // InstancesByPort retrieves instances for a service on the given ports with labels that
@@ -536,10 +536,10 @@ func (s *ServiceEntryStore) InstancesByPort(svc *model.Service, port int, labels
 	s.storeMutex.RLock()
 	defer s.storeMutex.RUnlock()
 
-	instanceLists := s.instances[instancesKey{svc.ClusterLocal.Hostname, svc.Attributes.Namespace}]
+	instanceLists := s.instances[instancesKey{svc.Hostname, svc.Attributes.Namespace}]
 	for _, instances := range instanceLists {
 		for _, instance := range instances {
-			if instance.Service.ClusterLocal.Hostname == svc.ClusterLocal.Hostname &&
+			if instance.Service.Hostname == svc.Hostname &&
 				labels.HasSubsetOf(instance.Endpoint.Labels) &&
 				portMatchSingle(instance, port) {
 				out = append(out, instance)
@@ -848,16 +848,20 @@ func (s *ServiceEntryStore) NetworkGateways() []*model.NetworkGateway {
 	return nil
 }
 
+func (s *ServiceEntryStore) MCSServices() []model.MCSServiceInfo {
+	return nil
+}
+
 func servicesDiff(os []*model.Service, ns []*model.Service) ([]*model.Service, []*model.Service, []*model.Service, []*model.Service) {
 	var added, deleted, updated, unchanged []*model.Service
 
 	oldServiceHosts := make(map[string]*model.Service, len(os))
 	newServiceHosts := make(map[string]*model.Service, len(ns))
 	for _, s := range os {
-		oldServiceHosts[string(s.ClusterLocal.Hostname)] = s
+		oldServiceHosts[string(s.Hostname)] = s
 	}
 	for _, s := range ns {
-		newServiceHosts[string(s.ClusterLocal.Hostname)] = s
+		newServiceHosts[string(s.Hostname)] = s
 	}
 
 	for name, oldSvc := range oldServiceHosts {
@@ -928,7 +932,7 @@ func autoAllocateIPs(services []*model.Service) []*model.Service {
 		//   for NONE because we will not know the original DST IP that the application requested.
 		// 2. the address is not set (0.0.0.0)
 		// 3. the hostname is not a wildcard
-		if svc.Address == constants.UnspecifiedIP && !svc.ClusterLocal.Hostname.IsWildCarded() &&
+		if svc.DefaultAddress == constants.UnspecifiedIP && !svc.Hostname.IsWildCarded() &&
 			svc.Resolution != model.Passthrough {
 			x++
 			if x%255 == 0 {
@@ -949,7 +953,7 @@ func autoAllocateIPs(services []*model.Service) []*model.Service {
 func makeConfigKey(svc *model.Service) model.ConfigKey {
 	return model.ConfigKey{
 		Kind:      gvk.ServiceEntry,
-		Name:      string(svc.ClusterLocal.Hostname),
+		Name:      string(svc.Hostname),
 		Namespace: svc.Attributes.Namespace,
 	}
 }

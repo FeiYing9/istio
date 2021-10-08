@@ -27,6 +27,7 @@ import (
 	"time"
 
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
+	route "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	discovery "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	gogojsonpb "github.com/gogo/protobuf/jsonpb"
 	"github.com/golang/protobuf/jsonpb"
@@ -34,6 +35,8 @@ import (
 	structpb "github.com/golang/protobuf/ptypes/struct"
 
 	meshconfig "istio.io/api/mesh/v1alpha1"
+	networking "istio.io/api/networking/v1alpha3"
+	istionetworking "istio.io/istio/pilot/pkg/networking"
 	"istio.io/istio/pilot/pkg/trustbundle"
 	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config/constants"
@@ -302,6 +305,8 @@ type Proxy struct {
 
 	// XdsNode is the xDS node identifier
 	XdsNode *core.Node
+
+	CatchAllVirtualHost *route.VirtualHost
 }
 
 // WatchedResource tracks an active DiscoveryRequest subscription.
@@ -797,6 +802,25 @@ func (node *Proxy) SetSidecarScope(ps *PushContext) {
 		node.SidecarScope = ps.getSidecarScope(node, nil)
 	}
 	node.PrevSidecarScope = sidecarScope
+	// Build CatchAllVirtualHost and cache it. This depends on sidecar scope config.
+	node.BuildCatchAllVirtualHost()
+}
+
+// Exposed only for tests. If used in regular code, should be called after SetSidecarScope.
+func (node *Proxy) BuildCatchAllVirtualHost() {
+	// Build CatchAllVirtualHost and cache it. This depends on sidecar scope config.
+	allowAny := false
+	egressDestination := ""
+	if node.SidecarScope.OutboundTrafficPolicy != nil {
+		if node.SidecarScope.OutboundTrafficPolicy.Mode == networking.OutboundTrafficPolicy_ALLOW_ANY {
+			allowAny = true
+		}
+		destination := node.SidecarScope.OutboundTrafficPolicy.EgressProxy
+		if destination != nil {
+			egressDestination = BuildSubsetKey(TrafficDirectionOutbound, destination.Subset, host.Name(destination.Host), int(destination.GetPort().Number))
+		}
+	}
+	node.CatchAllVirtualHost = istionetworking.BuildCatchAllVirtualHost(allowAny, egressDestination)
 }
 
 // SetGatewaysForProxy merges the Gateway objects associated with this
@@ -821,7 +845,7 @@ func (node *Proxy) SetServiceInstances(serviceDiscovery ServiceDiscovery) {
 				return instances[i].Service.CreationTime.Before(instances[j].Service.CreationTime)
 			}
 			// Additionally, sort by hostname just in case services created automatically at the same second.
-			return instances[i].Service.ClusterLocal.Hostname < instances[j].Service.ClusterLocal.Hostname
+			return instances[i].Service.Hostname < instances[j].Service.Hostname
 		}
 		return true
 	})
@@ -1056,6 +1080,10 @@ func (node *Proxy) IsVM() bool {
 	return node.Metadata != nil && node.Metadata.Labels[constants.TestVMLabel] != ""
 }
 
+func (node *Proxy) IsProxylessGrpc() bool {
+	return node.Metadata != nil && node.Metadata.Generator == "grpc"
+}
+
 type GatewayController interface {
 	ConfigStoreCache
 	// Recompute updates the internal state of the gateway controller for a given input. This should be
@@ -1065,4 +1093,12 @@ type GatewayController interface {
 	// For example, for resourceName of `kubernetes-gateway://ns-name/secret-name` and namespace of `ingress-ns`,
 	// this would return true only if there was a policy allowing `ingress-ns` to access Secrets in the `ns-name` namespace.
 	SecretAllowed(resourceName string, namespace string) bool
+}
+
+// OutboundListenerClass is a helper to turn a NodeType for outbound to a ListenerClass.
+func OutboundListenerClass(t NodeType) istionetworking.ListenerClass {
+	if t == Router {
+		return istionetworking.ListenerClassGateway
+	}
+	return istionetworking.ListenerClassSidecarOutbound
 }

@@ -43,7 +43,6 @@ import (
 	"istio.io/istio/pilot/pkg/serviceregistry/memory"
 	"istio.io/istio/pilot/pkg/serviceregistry/provider"
 	v3 "istio.io/istio/pilot/pkg/xds/v3"
-	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/schema/collection"
 	"istio.io/istio/pkg/network"
@@ -97,7 +96,7 @@ type AdsClient struct {
 	ConnectionID string              `json:"connectionId"`
 	ConnectedAt  time.Time           `json:"connectedAt"`
 	PeerAddress  string              `json:"address"`
-	Metadata     *model.NodeMetadata `json:"metadata"`
+	Metadata     *model.NodeMetadata `json:"metadata,omitempty"`
 	Watches      map[string][]string `json:"watches,omitempty"`
 }
 
@@ -203,7 +202,7 @@ func (s *DiscoveryServer) AddDebugHandlers(mux, internalMux *http.ServeMux, enab
 	s.addDebugHandler(mux, internalMux, "/debug/mesh", "Active mesh config", s.meshHandler)
 	s.addDebugHandler(mux, internalMux, "/debug/clusterz", "List remote clusters where istiod reads endpoints", s.clusterz)
 	s.addDebugHandler(mux, internalMux, "/debug/networkz", "List cross-network gateways", s.networkz)
-	s.addDebugHandler(mux, internalMux, "/debug/exportz", "List endpoints that been exported via MCS", s.exportz)
+	s.addDebugHandler(mux, internalMux, "/debug/mcsz", "List information about Kubernetes MCS services", s.mcsz)
 
 	s.addDebugHandler(mux, internalMux, "/debug/list", "List all supported debug commands in json", s.List)
 }
@@ -357,7 +356,7 @@ func (s *DiscoveryServer) endpointz(w http.ResponseWriter, req *http.Request) {
 			for _, p := range ss.Ports {
 				all := s.Env.ServiceDiscovery.InstancesByPort(ss, p.Port, nil)
 				for _, svc := range all {
-					_, _ = fmt.Fprintf(w, "%s:%s %s:%d %v %s\n", ss.ClusterLocal.Hostname,
+					_, _ = fmt.Fprintf(w, "%s:%s %s:%d %v %s\n", ss.Hostname,
 						p.Name, svc.Endpoint.Address, svc.Endpoint.EndpointPort, svc.Endpoint.Labels,
 						svc.Endpoint.ServiceAccount)
 				}
@@ -372,7 +371,7 @@ func (s *DiscoveryServer) endpointz(w http.ResponseWriter, req *http.Request) {
 		for _, p := range ss.Ports {
 			all := s.Env.ServiceDiscovery.InstancesByPort(ss, p.Port, nil)
 			resp = append(resp, endpointzResponse{
-				Service:   fmt.Sprintf("%s:%s", ss.ClusterLocal.Hostname, p.Name),
+				Service:   fmt.Sprintf("%s:%s", ss.Hostname, p.Name),
 				Endpoints: all,
 			})
 		}
@@ -862,36 +861,22 @@ func (s *DiscoveryServer) networkz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, mgr.AllGateways())
 }
 
-func (s *DiscoveryServer) exportz(w http.ResponseWriter, _ *http.Request) {
-	aggregateController, ok := s.Env.ServiceDiscovery.(*aggregate.Controller)
-	if !ok {
-		writeJSON(w, nil)
-		return
-	}
+func (s *DiscoveryServer) mcsz(w http.ResponseWriter, _ *http.Request) {
+	svcs := sortMCSServices(s.Env.MCSServices())
+	writeJSON(w, svcs)
+}
 
-	type ServiceExporter interface {
-		ExportedServices() []string
-	}
-
-	jsonMap := make(map[cluster.ID][]string)
-	for _, registry := range aggregateController.GetRegistries() {
-		if ctrl, ok := registry.(ServiceExporter); ok {
-			for _, export := range ctrl.ExportedServices() {
-				parts := strings.Split(export, ":")
-				if len(parts) == 2 {
-					clusterID := cluster.ID(parts[0])
-					namespacedName := parts[1]
-
-					// Append the export and keep the array sorted.
-					svcs := append(jsonMap[clusterID], namespacedName)
-					sort.Strings(svcs)
-					jsonMap[clusterID] = svcs
-				}
-			}
+func sortMCSServices(svcs []model.MCSServiceInfo) []model.MCSServiceInfo {
+	sort.Slice(svcs, func(i, j int) bool {
+		if strings.Compare(svcs[i].Cluster.String(), svcs[j].Cluster.String()) < 0 {
+			return true
 		}
-	}
-
-	writeJSON(w, jsonMap)
+		if strings.Compare(svcs[i].Namespace, svcs[j].Namespace) < 0 {
+			return true
+		}
+		return strings.Compare(svcs[i].Name, svcs[j].Name) < 0
+	})
+	return svcs
 }
 
 func (s *DiscoveryServer) clusterz(w http.ResponseWriter, _ *http.Request) {

@@ -32,6 +32,7 @@ import (
 	"istio.io/istio/galley/pkg/config/analysis/analyzers/destinationrule"
 	"istio.io/istio/galley/pkg/config/analysis/analyzers/gateway"
 	"istio.io/istio/galley/pkg/config/analysis/analyzers/injection"
+	"istio.io/istio/galley/pkg/config/analysis/analyzers/maturity"
 	"istio.io/istio/galley/pkg/config/analysis/analyzers/multicluster"
 	schemaValidation "istio.io/istio/galley/pkg/config/analysis/analyzers/schema"
 	"istio.io/istio/galley/pkg/config/analysis/analyzers/service"
@@ -62,6 +63,7 @@ type testCase struct {
 	meshNetworksFile string // Optional
 	analyzer         analysis.Analyzer
 	expected         []message
+	skipAll          bool
 }
 
 // Some notes on setting up tests for Analyzers:
@@ -84,6 +86,20 @@ var testGrid = []testCase{
 			{msg.MisplacedAnnotation, "Namespace staging"},
 			{msg.DeprecatedAnnotation, "Deployment fortio-deploy"},
 		},
+	},
+	{
+		name: "alpha",
+		inputFiles: []string{
+			"testdata/misannotated.yaml",
+		},
+		analyzer: &maturity.AlphaAnalyzer{},
+		expected: []message{
+			{msg.AlphaAnnotation, "Deployment fortio-deploy"},
+			{msg.AlphaAnnotation, "Pod invalid-annotations"},
+			{msg.AlphaAnnotation, "Pod invalid-annotations"},
+			{msg.AlphaAnnotation, "Service httpbin"},
+		},
+		skipAll: true,
 	},
 	{
 		name:       "deprecation",
@@ -485,6 +501,16 @@ var testGrid = []testCase{
 		},
 	},
 	{
+		name: "host defined in virtualservice not found in the gateway",
+		inputFiles: []string{
+			"testdata/virtualservice_host_not_found_gateway_with_ns_prefix.yaml",
+		},
+		analyzer: &virtualservice.GatewayAnalyzer{},
+		expected: []message{
+			{msg.VirtualServiceHostNotFoundInGateway, "VirtualService testing-service-01-test-01.default"},
+		},
+	},
+	{
 		name: "missing Addresses and Protocol in Service Entry",
 		inputFiles: []string{
 			"testdata/serviceentry-missing-addresses-protocol.yaml",
@@ -668,7 +694,9 @@ func TestAnalyzersInAll(t *testing.T) {
 	}
 
 	for _, tc := range testGrid {
-		g.Expect(allNames).To(ContainElement(tc.analyzer.Metadata().Name))
+		if !tc.skipAll {
+			g.Expect(allNames).To(ContainElement(tc.analyzer.Metadata().Name))
+		}
 	}
 }
 
